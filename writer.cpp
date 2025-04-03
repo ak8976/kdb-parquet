@@ -2,9 +2,9 @@
 #include <arrow/io/api.h>
 #include <arrow/result.h>
 #include <arrow/util/logging.h>
+#include <cmath>
 #include <iostream>
 #include <parquet/arrow/writer.h>
-
 extern "C" {
 #include "k.h"
 }
@@ -16,7 +16,14 @@ using namespace arrow;
     arrays.push_back(array);                                                   \
     fields.push_back(field(colname, arrow_type_expr));                         \
   }
-
+#define APPEND_VALUE(value, null_expr)                                         \
+  {                                                                            \
+    if (value == null_expr) {                                                  \
+      ARROW_RETURN_NOT_OK(builder.AppendNull());                               \
+    } else {                                                                   \
+      ARROW_RETURN_NOT_OK(builder.Append(value));                              \
+    }                                                                          \
+  }
 // Helper: Convert KDB table to Arrow table
 Status kdb_to_arrow(std::shared_ptr<Table>& arrow_table, K table) {
   if (table->t != 98) {
@@ -31,6 +38,22 @@ Status kdb_to_arrow(std::shared_ptr<Table>& arrow_table, K table) {
     std::string colname = kS(col_names)[c];
     K col = kK(col_vectors)[c];
     switch (col->t) {
+      case 0: { // mixed (could be string)
+        for (int i = 0; i < n_rows; ++i) {
+          if (kK(col)[i]->t != KC) {
+            return Status::Invalid(
+                "Unsupported general list structure (not string list)");
+          }
+        }
+        StringBuilder builder;
+        for (int i = 0; i < n_rows; ++i) {
+          K str_k = kK(col)[i];
+          std::string s((S)kC(str_k), str_k->n);
+          ARROW_RETURN_NOT_OK(builder.Append(s));
+        }
+        APPEND_ARRAY(builder, utf8());
+        break;
+      }
       case KB: { // boolean
         BooleanBuilder builder;
         for (int i = 0; i < n_rows; ++i) {
@@ -41,56 +64,46 @@ Status kdb_to_arrow(std::shared_ptr<Table>& arrow_table, K table) {
       }
       case KH: { // short
         Int16Builder builder;
-        H value;
         for (int i = 0; i < n_rows; ++i) {
-          value = kH(col)[i];
-          if (value == nh) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-          } else {
-            ARROW_RETURN_NOT_OK(builder.Append(value));
-          }
+          APPEND_VALUE(kH(col)[i], nh);
         }
         APPEND_ARRAY(builder, int16());
         break;
       }
       case KI: { // int
         Int32Builder builder;
-        I value;
         for (int i = 0; i < n_rows; ++i) {
-          value = kI(col)[i];
-          if (value == ni) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-          } else {
-            ARROW_RETURN_NOT_OK(builder.Append(value));
-          }
+          APPEND_VALUE(kI(col)[i], ni);
         }
         APPEND_ARRAY(builder, int32());
         break;
       }
       case KJ: { // long
         Int64Builder builder;
-        J value;
         for (int i = 0; i < n_rows; ++i) {
-          value = kJ(col)[i];
-          if (value == nj) {
+          APPEND_VALUE(kJ(col)[i], nj);
+        }
+        APPEND_ARRAY(builder, int64());
+        break;
+      }
+      case KE: { // real
+        FloatBuilder builder;
+        E value;
+        for (int i = 0; i < n_rows; ++i) {
+          value = kE(col)[i];
+          if (std::isnan(value)) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
           } else {
             ARROW_RETURN_NOT_OK(builder.Append(value));
           }
         }
-        APPEND_ARRAY(builder, int64());
+        APPEND_ARRAY(builder, float32());
         break;
       }
       case KF: { // float
         DoubleBuilder builder;
-        F value;
         for (int i = 0; i < n_rows; ++i) {
-          value = kF(col)[i];
-          if (value == nf) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-          } else {
-            ARROW_RETURN_NOT_OK(builder.Append(value));
-          }
+          APPEND_VALUE(kF(col)[i], nf);
         }
         APPEND_ARRAY(builder, float64());
         break;
@@ -142,29 +155,16 @@ Status kdb_to_arrow(std::shared_ptr<Table>& arrow_table, K table) {
       }
       case KN: { // timespan
         Time64Builder builder(time64(TimeUnit::NANO), default_memory_pool());
-        J value;
         for (int i = 0; i < n_rows; ++i) {
-          value = kJ(col)[i];
-          if (value == nj) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-          }
-          else{
-            ARROW_RETURN_NOT_OK(builder.Append(value));
-          }
+          APPEND_VALUE(kJ(col)[i], nj);
         }
         APPEND_ARRAY(builder, time64(TimeUnit::NANO));
         break;
       }
       case KT: { // time
         Time32Builder builder(time32(TimeUnit::MILLI), default_memory_pool());
-        I value;
         for (int i = 0; i < n_rows; ++i) {
-          value = kI(col)[i];
-          if (value == ni) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-          } else {
-            ARROW_RETURN_NOT_OK(builder.Append(value));
-          }
+          APPEND_VALUE(kI(col)[i], ni);
         }
         APPEND_ARRAY(builder, time32(TimeUnit::NANO));
         break;
