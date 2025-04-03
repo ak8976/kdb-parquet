@@ -41,49 +41,85 @@ Status kdb_to_arrow(std::shared_ptr<Table>& arrow_table, K table) {
       }
       case KH: { // short
         Int16Builder builder;
+        H value;
         for (int i = 0; i < n_rows; ++i) {
-          ARROW_RETURN_NOT_OK(builder.Append(kH(col)[i]));
+          value = kH(col)[i];
+          if (value == nh) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+          } else {
+            ARROW_RETURN_NOT_OK(builder.Append(value));
+          }
         }
         APPEND_ARRAY(builder, int16());
         break;
       }
       case KI: { // int
         Int32Builder builder;
+        I value;
         for (int i = 0; i < n_rows; ++i) {
-          ARROW_RETURN_NOT_OK(builder.Append(kI(col)[i]));
+          value = kI(col)[i];
+          if (value == ni) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+          } else {
+            ARROW_RETURN_NOT_OK(builder.Append(value));
+          }
         }
         APPEND_ARRAY(builder, int32());
         break;
       }
       case KJ: { // long
         Int64Builder builder;
+        J value;
         for (int i = 0; i < n_rows; ++i) {
-          ARROW_RETURN_NOT_OK(builder.Append(kJ(col)[i]));
+          value = kJ(col)[i];
+          if (value == nj) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+          } else {
+            ARROW_RETURN_NOT_OK(builder.Append(value));
+          }
         }
         APPEND_ARRAY(builder, int64());
         break;
       }
       case KF: { // float
         DoubleBuilder builder;
+        F value;
         for (int i = 0; i < n_rows; ++i) {
-          ARROW_RETURN_NOT_OK(builder.Append(kF(col)[i]));
+          value = kF(col)[i];
+          if (value == nf) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+          } else {
+            ARROW_RETURN_NOT_OK(builder.Append(value));
+          }
         }
         APPEND_ARRAY(builder, float64());
         break;
       }
       case KD: { // date
         Date32Builder builder;
+        I value;
         constexpr int kdb_epoch_offset = 10957;
         for (int i = 0; i < n_rows; ++i) {
-          ARROW_RETURN_NOT_OK(builder.Append(kI(col)[i] + kdb_epoch_offset));
+          value = kI(col)[i];
+          if (value == ni) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+          } else {
+            ARROW_RETURN_NOT_OK(builder.Append(value + kdb_epoch_offset));
+          }
         }
         APPEND_ARRAY(builder, date32());
         break;
       }
       case KS: { // symbol
         StringBuilder builder;
+        S value;
         for (int i = 0; i < n_rows; ++i) {
-          ARROW_RETURN_NOT_OK(builder.Append(kS(col)[i]));
+          value = kS(col)[i];
+          if (value[0] == '\0') {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+          } else {
+            ARROW_RETURN_NOT_OK(builder.Append(value));
+          }
         }
         APPEND_ARRAY(builder, utf8());
         break;
@@ -92,24 +128,43 @@ Status kdb_to_arrow(std::shared_ptr<Table>& arrow_table, K table) {
         TimestampBuilder builder(timestamp(TimeUnit::NANO),
                                  default_memory_pool());
         constexpr long long kdb_epoch_offset = 946684800000000000LL;
+        J value;
         for (int i = 0; i < n_rows; ++i) {
-          ARROW_RETURN_NOT_OK(builder.Append(kJ(col)[i] + kdb_epoch_offset));
+          value = kJ(col)[i];
+          if (value == nj) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+          } else {
+            ARROW_RETURN_NOT_OK(builder.Append(value + kdb_epoch_offset));
+          }
         }
         APPEND_ARRAY(builder, timestamp(TimeUnit::NANO));
         break;
       }
       case KN: { // timespan
         Time64Builder builder(time64(TimeUnit::NANO), default_memory_pool());
+        J value;
         for (int i = 0; i < n_rows; ++i) {
-          ARROW_RETURN_NOT_OK(builder.Append(kJ(col)[i]));
+          value = kJ(col)[i];
+          if (value == nj) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+          }
+          else{
+            ARROW_RETURN_NOT_OK(builder.Append(value));
+          }
         }
         APPEND_ARRAY(builder, time64(TimeUnit::NANO));
         break;
       }
       case KT: { // time
         Time32Builder builder(time32(TimeUnit::MILLI), default_memory_pool());
+        I value;
         for (int i = 0; i < n_rows; ++i) {
-          ARROW_RETURN_NOT_OK(builder.Append(kI(col)[i]));
+          value = kI(col)[i];
+          if (value == ni) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+          } else {
+            ARROW_RETURN_NOT_OK(builder.Append(value));
+          }
         }
         APPEND_ARRAY(builder, time32(TimeUnit::NANO));
         break;
