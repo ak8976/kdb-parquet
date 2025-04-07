@@ -8,4 +8,4 @@ include_directories(${CMAKE_SOURCE_DIR})  # for k.h
 link_directories("$ENV{CONDA_PREFIX}/lib")
 
 add_library(parquet_writer SHARED writer.cpp c.o)
-target_link_libraries(parquet_writer arrow parquet)
+target_link_libraries(parquet_writer arrow parquet arrow_dataset)
