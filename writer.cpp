@@ -8,7 +8,6 @@
 #include <filesystem>
 #include <iostream>
 #include <parquet/arrow/writer.h>
-#include <unistd.h>
 extern "C" {
 #include "k.h"
 }
