@@ -56,6 +56,11 @@ Status kdb_to_arrow(shared_ptr<Table>& arrow_table, K table) {
   for (size_t c = 0; c < col_names->n; ++c) {
     string col_name = kS(col_names)[c];
     K col = kK(col_vectors)[c];
+    bool is_enum = (col->t >= 20 && col->t <= 76);
+    if (is_enum) {
+      col = k(0, (S) "value", r1(col), (K)0); // de-enumerate enum list
+      if (!col) return Status::Invalid("Failed to de-enumerate list");
+    }
     switch (col->t) {
       case 0: { // mixed (could be string)
         for (size_t i = 0; i < n_rows; ++i) {
@@ -68,6 +73,26 @@ Status kdb_to_arrow(shared_ptr<Table>& arrow_table, K table) {
         for (size_t i = 0; i < n_rows; ++i) {
           K str_k = kK(col)[i];
           string s((S)kC(str_k), str_k->n);
+          ARROW_RETURN_NOT_OK(builder.Append(s));
+        }
+        APPEND_ARRAY(builder, utf8());
+        break;
+      }
+      case 77: { // anymap (could be string)
+        for (size_t i = 0; i < n_rows; ++i) {
+          K item = vi(col, i);
+          if (item->t != KC) {
+            r0(item);
+            return Status::Invalid(
+                "Unsupported anymap structure (not string list)");
+          }
+          r0(item);
+        }
+        StringBuilder builder;
+        for (size_t i = 0; i < n_rows; ++i) {
+          K item = vi(col, i);
+          string s((S)kC(item), item->n);
+          r0(item);
           ARROW_RETURN_NOT_OK(builder.Append(s));
         }
         APPEND_ARRAY(builder, utf8());
@@ -192,6 +217,7 @@ Status kdb_to_arrow(shared_ptr<Table>& arrow_table, K table) {
         return Status::Invalid("Unsupported column type: " +
                                to_string(int(col->t)));
     }
+    if (is_enum) r0(col);
   }
   arrow_table = Table::Make(make_shared<Schema>(fields), arrays);
   return Status::OK();
@@ -212,7 +238,7 @@ Status set_write_options(dataset::FileSystemDatasetWriteOptions& write_options,
     auto write_format = make_shared<dataset::ParquetFileFormat>();
     write_options.file_write_options = write_format->DefaultWriteOptions();
     write_options.filesystem = fs;
-    write_options.base_dir = path.filename().string();
+    write_options.base_dir = path.string();
     write_options.basename_template = "part{i}.parquet";
     write_options.existing_data_behavior =
         dataset::ExistingDataBehavior::kOverwriteOrIgnore;
