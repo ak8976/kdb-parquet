@@ -9,3 +9,6 @@ link_directories("$ENV{CONDA_PREFIX}/lib")
 
 add_library(parquet_writer SHARED writer.cpp c.o)
 target_link_libraries(parquet_writer arrow parquet arrow_dataset)
+file(COPY ${CMAKE_SOURCE_DIR}/parquet.q DESTINATION ${CMAKE_BINARY_DIR})
+file(COPY ${CMAKE_SOURCE_DIR}/demo_write_parquet.q DESTINATION ${CMAKE_BINARY_DIR})
+file(COPY ${CMAKE_SOURCE_DIR}/trades.csv DESTINATION ${CMAKE_BINARY_DIR})
