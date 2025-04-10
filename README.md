@@ -27,7 +27,7 @@ cd kdb-parquet
 ### 2. Set up environment
 Install required dependencies using conda:
 ```bash
-conda create -n arrow-cpp -c conda-forge arrow-cpp gxx_linux-64 cmake make python=3.10
+conda create -n arrow-cpp -c conda-forge arrow-cpp gxx_linux-64 cmake make
 conda activate arrow-cpp
 ```
 ### 3. Build the shared library
