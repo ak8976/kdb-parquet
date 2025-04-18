@@ -37,31 +37,53 @@ cmake ..
 make
 ```
 This creates the libparquet_writer.so shared library
+## Function
+```cpp
+K write_parquet(K table, K path, K k_par_cols, K opts);
+```
+`table`: KDB+ table (in-memory or splayed) to be written<br>
+`path`: Symbol representing the target file or directory path<br>
+`k_par_cols`: Partition column(s)
+- A single symbol (e.g. `` `date ``)
+- A list of symbols (e.g. `` `date`symbol ``)
+- An empty list or null symbol ``(() or `)`` for writing a flat Parquet file
+
+`opts`: Dictionary of optional write settings. Supported keys:
+- \`use_threads: Boolean, enable multi-threaded writes
+- \`enable_dict: Boolean (apply to all columns), symbol or symbol list to apply dictionary encoding to specific columns
+- \`disable_dict: Boolean (apply to all columns), symbol or symbol list to remove dictionary encoding from specific columns
+- \`codec: Symbol representing global compression codec to apply (`` `snappy`zstd`gzip`uncompressed``))
+- \`store_schema: Boolean, save arrow schema in Parquet metadata
+- \`chunk_size: Long, maximum number of rows per row group
+  
 ## Usage from q
 ```q
-q)to_parquet:`libparquet_writer 2:(`write_parquet; 3)
+q)to_parquet:`libparquet_writer 2:(`write_parquet; 4)
 ```
 ### Basic examples
 ```q
-q)to_parquet:`libparquet_writer 2:(`write_parquet; 3)
+q)to_parquet:`libparquet_writer 2:(`write_parquet; 4)
 // Flat file output
-q)to_parquet[([]a:1 2 3;b:`a`b`c);`test.parquet;()]
+q)to_parquet[([]a:1 2 3;b:`a`b`c);`test.parquet;();([])]
 
 // Single-level partition (e.g. by symbol)
-q)to_parquet[([]a:1 2 3;b:`a`b`c);`test;`b]
+q)to_parquet[([]a:1 2 3;b:`a`b`c);`test;`b;([])]
+
+// Single-level partition with opts
+q)to_parquet[([]a:1 2 3;b:`a`b`c);`test;`b;([compression:`gzip;enable_dict:1b;chunk_size:1000])]
 ```
 ### From partitioned/splayed tables
 ```q
-q)to_parquet:`libparquet_writer 2:(`write_parquet; 3)
+q)to_parquet:`libparquet_writer 2:(`write_parquet; 4)
 q)cd:system"cd"
 // Setup a splayed table
 q)trade:1000000#("SPFJSNB*"; 1#",") 0: `:trades.csv
 q)update date:2025.04.02 from trade
 q).Q.dd[`:db;2025.04.02,`trade`] set .Q.en[`:db;trade]
 q)\l db
-q)to_parquet[select from trade where date=2025.04.02;`$cd,"/trade.parquet";()]
-q)to_parquet[select from trade where date=2025.04.02;`$cd,"/trade_date";`date]
-q)to_parquet[select from trade where date=2025.04.02;`$cd,"/trade_date_sym";`date`symbol]
+q)to_parquet[select from trade where date=2025.04.02;`$cd,"/trade.parquet";();([])]
+q)to_parquet[select from trade where date=2025.04.02;`$cd,"/trade_date";`date;([])]
+q)to_parquet[select from trade where date=2025.04.02;`$cd,"/trade_date_sym";`date`symbol;([])]
 ```
 ## Example Queries in DuckDB
 DuckDB natively supports Parquet and Hive-style partitioning:
