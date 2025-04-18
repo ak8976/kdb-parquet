@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <iostream>
 #include <parquet/arrow/writer.h>
+#include <set>
 extern "C" {
 #include "k.h"
 }
@@ -47,6 +48,9 @@ bool is_in(const char* symbol, K symbol_list) {
   }
   return false;
 }
+static const set<string> allowed_options = {"use_threads",  "enable_dict",
+                                            "disable_dict", "chunk_size",
+                                            "store_schema", "compression"};
 Status kdb_to_arrow(shared_ptr<Table>& arrow_table, K table) {
   K col_names = kK(table->k)[0];
   K col_vectors = kK(table->k)[1];
@@ -222,11 +226,103 @@ Status kdb_to_arrow(shared_ptr<Table>& arrow_table, K table) {
   arrow_table = Table::Make(make_shared<Schema>(fields), arrays);
   return Status::OK();
 }
-
+Status
+set_writer_properties(K& opts,
+                      shared_ptr<parquet::ArrowWriterProperties>& arrow_props,
+                      std::shared_ptr<parquet::WriterProperties>& parq_props) {
+  if (opts->n) {
+    auto arrow_writer_props = new parquet::ArrowWriterProperties::Builder();
+    auto parq_writer_props = new parquet::WriterProperties::Builder();
+    K keys = kK(opts)[0];
+    K vals = kK(opts)[1];
+    for (size_t i = 0; i < keys->n; ++i) {
+      string opt(kS(keys)[i]);
+      if (allowed_options.find(opt) == allowed_options.end()) {
+        return Status::Invalid("Invalid option: " + opt);
+      }
+      if (allowed_options.find(opt) != allowed_options.end()) {
+        // parquet writer properties
+        if (opt == "compression") {
+          string codec;
+          if (kK(vals)[i]->t == -KS) {
+            codec = kK(vals)[i]->s;
+          } else if (vals->t == KS) {
+            codec = kS(vals)[i];
+          }
+          if (codec == "snappy")
+            parq_writer_props->compression(Compression::SNAPPY);
+          else if (codec == "zstd")
+            parq_writer_props->compression(Compression::ZSTD);
+          else if (codec == "gzip")
+            parq_writer_props->compression(Compression::GZIP);
+          else
+            return Status::Invalid("Unsupported compression: " + codec);
+        }
+        if (opt == "enable_dict") {
+          if (kK(vals)[i]->t == KS) {
+            for (size_t j = 0; j < kK(vals)[i]->n; ++j) {
+              parq_writer_props->enable_dictionary(kS(kK(vals)[i])[j]);
+            }
+          } else if (vals->t == KS) {
+            parq_writer_props->enable_dictionary(kS(vals)[i]);
+          } else if (vals->t == KB) {
+            if (static_cast<bool>(kG(vals)[i]))
+              parq_writer_props->enable_dictionary();
+          } else if (kK(vals)[i]->t == -KB) {
+            if (static_cast<bool>(kK(vals)[i]->g))
+              parq_writer_props->enable_dictionary();
+          }
+        }
+        if (opt == "disable_dict") {
+          if (kK(vals)[i]->t == KS) {
+            for (size_t j = 0; j < kK(vals)[i]->n; ++j) {
+              parq_writer_props->disable_dictionary(kS(kK(vals)[i])[j]);
+            }
+          } else if (vals->t == KS) {
+            parq_writer_props->disable_dictionary(kS(vals)[i]);
+          } else if (vals->t == KB) {
+            if (static_cast<bool>(kG(vals)[i]))
+              parq_writer_props->disable_dictionary();
+          } else if (kK(vals)[i]->t == -KB) {
+            if (static_cast<bool>(kK(vals)[i]->g))
+              parq_writer_props->disable_dictionary();
+          }
+        }
+        if (opt == "chunk_size") {
+          if (kK(vals)[i]->t == -KJ) {
+            parq_writer_props->max_row_group_length(kK(vals)[i]->j);
+          } else if (vals->t == KJ) {
+            parq_writer_props->max_row_group_length(kJ(vals)[i]);
+          }
+        }
+        // arrow writer properties
+        if (opt == "use_threads") {
+          if (kK(vals)[i]->t == -KB) {
+            arrow_writer_props->set_use_threads(
+                static_cast<bool>(kK(vals)[i]->g));
+          } else if (vals->t == KB) {
+            arrow_writer_props->set_use_threads(static_cast<bool>(kG(vals)[i]));
+          }
+        }
+        if (opt == "store_schema") {
+          if (kK(vals)[i]->t == -KB && static_cast<bool>(kK(vals)[i]->g)) {
+            arrow_writer_props->store_schema();
+          } else if (vals->t == KB && static_cast<bool>(kG(vals)[i])) {
+            arrow_writer_props->store_schema();
+          }
+        }
+      }
+    }
+    arrow_props = arrow_writer_props->build();
+    parq_props = parq_writer_props->build();
+  }
+  return Status::OK();
+}
 Status set_write_options(dataset::FileSystemDatasetWriteOptions& write_options,
                          shared_ptr<Table>& arrow_table,
                          shared_ptr<fs::FileSystem>& fs,
-                         vector<string>& par_cols, filesystem::path& path) {
+                         vector<string>& par_cols, filesystem::path& path,
+                         K& opts) {
   try {
     vector<shared_ptr<Field>> par_fields;
     for (const string& col_name : par_cols) {
@@ -235,27 +331,38 @@ Status set_write_options(dataset::FileSystemDatasetWriteOptions& write_options,
     auto partitioning =
         make_shared<dataset::HivePartitioning>(make_shared<Schema>(par_fields));
     write_options.partitioning = partitioning;
-    auto write_format = make_shared<dataset::ParquetFileFormat>();
-    write_options.file_write_options = write_format->DefaultWriteOptions();
+    write_options.file_write_options =
+        make_shared<dataset::ParquetFileFormat>()->DefaultWriteOptions();
     write_options.filesystem = fs;
     write_options.base_dir = path.string();
     write_options.basename_template = "part{i}.parquet";
     write_options.existing_data_behavior =
         dataset::ExistingDataBehavior::kOverwriteOrIgnore;
+    auto options =
+        internal::checked_pointer_cast<dataset::ParquetFileWriteOptions>(
+            write_options.file_write_options);
+    Status st = set_writer_properties(opts, options->arrow_writer_properties,
+                                      options->writer_properties);
+    if (!st.ok()) {
+      return Status::Invalid(st.message());
+    }
   } catch (const exception& e) {
     return Status::Invalid(e.what());
   }
   return Status::OK();
 }
-extern "C" K write_parquet(K table, K path, K k_par_cols) {
+extern "C" K write_parquet(K table, K path, K k_par_cols, K opts) {
   if (table->t != XT) {
-    return krr((S) "Not a table");
+    return krr((S) "not a table");
   }
   if (path->t != -KS) {
     return krr((S) "Path not a symbol");
   }
   if (!(k_par_cols->t == -KS || k_par_cols->t == KS || k_par_cols->n == 0)) {
     return krr((S) "Partition column(s) must be symbol/symbol list");
+  }
+  if (opts->t != XD) {
+    return krr((S) "opts not a dictionary");
   }
   vector<string> par_cols;
   if (k_par_cols->t == -KS) {
@@ -286,8 +393,13 @@ extern "C" K write_parquet(K table, K path, K k_par_cols) {
       shared_ptr<io::FileOutputStream> outfile;
       CHECK_STATUS(
           io::FileOutputStream::Open(abs_path.string()).Value(&outfile));
-      CHECK_STATUS(parquet::arrow::WriteTable(*arrow_table,
-                                              default_memory_pool(), outfile));
+      std::shared_ptr<parquet::ArrowWriterProperties> arrow_props;
+      std::shared_ptr<parquet::WriterProperties> parq_props =
+          parquet::default_writer_properties();
+      CHECK_STATUS(set_writer_properties(opts, arrow_props, parq_props));
+      CHECK_STATUS(parquet::arrow::WriteTable(
+          *arrow_table, default_memory_pool(), outfile,
+          parquet::DEFAULT_MAX_ROW_GROUP_LENGTH, parq_props, arrow_props));
     } else {
       // Save as Hive Partitioned table
       auto write_dataset = make_shared<TableBatchReader>(arrow_table);
@@ -300,7 +412,7 @@ extern "C" K write_parquet(K table, K path, K k_par_cols) {
                        .Value(&fs));
       dataset::FileSystemDatasetWriteOptions write_options;
       CHECK_STATUS(set_write_options(write_options, arrow_table, fs, par_cols,
-                                     abs_path));
+                                     abs_path, opts));
       CHECK_STATUS(
           dataset::FileSystemDataset::Write(write_options, write_scanner));
     }
