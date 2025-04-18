@@ -315,6 +315,8 @@ set_writer_properties(K& opts,
     }
     arrow_props = arrow_writer_props->build();
     parq_props = parq_writer_props->build();
+    delete arrow_writer_props;
+    delete parq_writer_props;
   }
   return Status::OK();
 }
